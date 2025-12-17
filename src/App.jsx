@@ -27,6 +27,8 @@ function App() {
   const [attendance, setAttendance] = useState([]);
   const [customColumns, setCustomColumns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [editingStudent, setEditingStudent] = useState(null);
+  const [editingPayment, setEditingPayment] = useState(null);
 
   // Filters
   const [studentFilters, setStudentFilters] = useState({
@@ -50,6 +52,92 @@ function App() {
     fetchAllData();
   }, []);
 
+  // Student CRUD
+  const handleUpdateStudentFull = async (id, updatedStudent) => {
+    const { data, error } = await supabase
+      .from("students")
+      .update({
+        name: updatedStudent.name,
+        phone: updatedStudent.phone,
+        status: updatedStudent.status,
+        join_date: updatedStudent.joinDate,
+        finish_date: updatedStudent.finishDate,
+        group_id: updatedStudent.groupId,
+        payment_day: updatedStudent.paymentDay,
+      })
+      .eq("id", id)
+      .select();
+
+    if (error) {
+      alert("Սխալ ուսանողին թարմացնելիս");
+      console.error(error);
+    } else if (data) {
+      setStudents(students.map((s) => (s.id === id ? data[0] : s)));
+      setEditingStudent(null);
+    }
+  };
+
+  const handleDeleteStudent = async (studentId) => {
+    if (
+      !window.confirm("Դուք համոզվա՞ծ եք, որ ցանկանում եք ջնջել այս ուսանողին:")
+    ) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("students")
+      .delete()
+      .eq("id", studentId);
+
+    if (error) {
+      alert("Սխալ ուսանողին ջնջելիս");
+      console.error(error);
+    } else {
+      setStudents(students.filter((s) => s.id !== studentId));
+    }
+  };
+
+  // Payment CRUD
+  const handleUpdatePayment = async (id, updatedPayment) => {
+    const { data, error } = await supabase
+      .from("payments")
+      .update({
+        student_id: updatedPayment.studentId,
+        amount: updatedPayment.amount,
+        date: updatedPayment.date,
+        paid: updatedPayment.paid,
+      })
+      .eq("id", id)
+      .select();
+
+    if (error) {
+      alert("Սխալ վճարումը թարմացնելիս");
+      console.error(error);
+    } else if (data) {
+      setPayments(payments.map((p) => (p.id === id ? data[0] : p)));
+      setEditingPayment(null);
+    }
+  };
+
+  const handleDeletePayment = async (paymentId) => {
+    if (
+      !window.confirm("Դուք համոզվա՞ծ եք, որ ցանկանում եք ջնջել այս վճարումը:")
+    ) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("payments")
+      .delete()
+      .eq("id", paymentId);
+
+    if (error) {
+      alert("Սխալ վճարումը ջնջելիս");
+      console.error(error);
+    } else {
+      setPayments(payments.filter((p) => p.id !== paymentId));
+    }
+  };
   const fetchAllData = async () => {
     setLoading(true);
     try {
@@ -104,7 +192,7 @@ function App() {
               .from("payments")
               .insert({
                 student_id: student.id,
-                amount: 200,
+                amount: 20000,
                 date: paymentDate,
                 paid: false,
               })
@@ -328,9 +416,15 @@ function App() {
             filters={studentFilters}
             setFilters={setStudentFilters}
             onAddStudent={() => setShowAddStudent(true)}
+            onEditStudent={(student) => {
+              setEditingStudent(student);
+              setShowAddStudent(true);
+            }}
+            onDeleteStudent={handleDeleteStudent}
             customColumns={customColumns}
             onAddColumn={() => setShowAddColumn(true)}
             onUpdateStudent={handleUpdateStudent}
+            payments={payments} // ԱՎԵԼԱՑՐԵՔ ԱՅՍ
           />
         )}
 
@@ -354,6 +448,11 @@ function App() {
             filters={paymentFilters}
             setFilters={setPaymentFilters}
             onAddPayment={() => setShowAddPayment(true)}
+            onEditPayment={(payment) => {
+              setEditingPayment(payment);
+              setShowAddPayment(true);
+            }}
+            onDeletePayment={handleDeletePayment}
           />
         )}
       </div>
@@ -361,16 +460,26 @@ function App() {
       {showAddStudent && (
         <AddStudentModal
           groups={groups}
-          onClose={() => setShowAddStudent(false)}
+          onClose={() => {
+            setShowAddStudent(false);
+            setEditingStudent(null);
+          }}
           onAdd={handleAddStudent}
+          onUpdate={handleUpdateStudentFull}
+          editingStudent={editingStudent}
         />
       )}
 
       {showAddPayment && (
         <AddPaymentModal
           students={students.filter((s) => s.status === "active")}
-          onClose={() => setShowAddPayment(false)}
+          onClose={() => {
+            setShowAddPayment(false);
+            setEditingPayment(null);
+          }}
           onAdd={handleAddPayment}
+          onUpdate={handleUpdatePayment}
+          editingPayment={editingPayment}
         />
       )}
 
@@ -513,17 +622,33 @@ function Dashboard({ students, groups, payments, attendance }) {
     </div>
   );
 }
-
+// Update StudentsView component signature:
 function StudentsView({
   students,
   groups,
   filters,
   setFilters,
   onAddStudent,
+  onEditStudent,
+  onDeleteStudent,
   customColumns,
   onAddColumn,
   onUpdateStudent,
+  payments, // ԱՎԵԼԱՑՐԵՔ ԱՅՍ
 }) {
+  const hasStudentPaidThisMonth = (studentId) => {
+    const today = new Date();
+    const currentMonth = today.toISOString().substring(0, 7);
+
+    const payment = payments.find(
+      (p) =>
+        p.student_id === studentId &&
+        p.date.startsWith(currentMonth) &&
+        p.paid === true
+    );
+
+    return payment ? true : false;
+  };
   const filteredStudents = useMemo(() => {
     return students.filter((student) => {
       if (filters.status !== "all" && student.status !== filters.status)
@@ -543,13 +668,13 @@ function StudentsView({
         <div className="flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">Ուսանողներ</h2>
           <div className="flex flex-col sm:flex-row gap-2">
-            <button
+            {/* <button
               onClick={onAddColumn}
               className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600"
             >
               <Plus size={18} />
               Ավելացնել սյունակ
-            </button>
+            </button> */}
             <button
               onClick={onAddStudent}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
@@ -614,6 +739,9 @@ function StudentsView({
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Վճարման օր
               </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Տվել է այս ամսվա վարձը
+              </th>
               {customColumns.map((col) => (
                 <th
                   key={col.name}
@@ -622,44 +750,82 @@ function StudentsView({
                   {col.name}
                 </th>
               ))}
+
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Գործողություններ
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {filteredStudents.map((student) => {
               const group = groups.find((g) => g.id === student.group_id);
               return (
-                <tr key={student.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 font-medium">{student.name}</td>
-                  <td className="px-6 py-4 text-gray-600">{student.phone}</td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {group?.name || "-"}
-                  </td>
-                  <td className="px-6 py-4">
-                    <StatusBadge status={student.status} />
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {student.join_date}
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {student.finish_date || "-"}
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {student.payment_day}
-                  </td>
-                  {customColumns.map((col) => (
-                    <td key={col.name} className="px-6 py-4">
-                      <input
-                        type="text"
-                        value={student.custom_fields?.[col.name] || ""}
-                        onChange={(e) =>
-                          onUpdateStudent(student.id, col.name, e.target.value)
-                        }
-                        className="w-full px-2 py-1 border rounded text-sm"
-                        placeholder={`Մուտքագրեք ${col.name}`}
-                      />
+                <>
+                  <tr key={student.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 font-medium">{student.name}</td>
+                    <td className="px-6 py-4 text-gray-600">{student.phone}</td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {group?.name || "-"}
                     </td>
-                  ))}
-                </tr>
+                    <td className="px-6 py-4">
+                      <StatusBadge status={student.status} />
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {student.join_date}
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {student.finish_date || "-"}
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {student.payment_day}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          hasStudentPaidThisMonth(student.id)
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }`}
+                      >
+                        {hasStudentPaidThisMonth(student.id) ? "Այո" : "Ոչ"}
+                      </span>
+                    </td>
+                    {customColumns.map((col) => (
+                      <td key={col.name} className="px-6 py-4">
+                        <input
+                          type="text"
+                          value={student.custom_fields?.[col.name] || ""}
+                          onChange={(e) =>
+                            onUpdateStudent(
+                              student.id,
+                              col.name,
+                              e.target.value
+                            )
+                          }
+                          className="w-full px-2 py-1 border rounded text-sm"
+                          placeholder={`Մուտքագրեք ${col.name}`}
+                        />
+                      </td>
+                    ))}
+
+                    <td className="px-6 py-4">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => onEditStudent(student)}
+                          className="text-blue-600 hover:text-blue-800 text-sm"
+                        >
+                          Խմբագրել
+                        </button>
+                        <button
+                          onClick={() => onDeleteStudent(student.id)}
+                          className="text-red-600 hover:text-red-800 text-sm"
+                        >
+                          Ջնջել
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </>
               );
             })}
           </tbody>
@@ -761,12 +927,256 @@ function GroupsView({
   );
 }
 
+function StatCard({ title, value, icon: Icon, color }) {
+  const colorClasses = {
+    blue: "bg-blue-500",
+    green: "bg-green-500",
+    emerald: "bg-emerald-500",
+    red: "bg-red-500",
+  };
+
+  return (
+    <div className="bg-white p-6 rounded-lg shadow-sm">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-gray-600 mb-1">{title}</p>
+          <p className="text-2xl font-bold">{value}</p>
+        </div>
+        <div className={`${colorClasses[color]} p-3 rounded-lg`}>
+          <Icon className="text-white" size={24} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusBar({ label, count, color }) {
+  return (
+    <div>
+      <div className="flex justify-between text-sm mb-1">
+        <span className="font-medium">{label}</span>
+        <span className="text-gray-600">{count}</span>
+      </div>
+      <div className="w-full bg-gray-200 rounded-full h-2">
+        <div
+          className={`${color} h-2 rounded-full`}
+          style={{ width: `${Math.min(count * 20, 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const colors = {
+    active: "bg-green-100 text-green-800",
+    finished: "bg-blue-100 text-blue-800",
+    left: "bg-gray-100 text-gray-800",
+  };
+
+  const labels = {
+    active: "Ակտիվ",
+    finished: "Ավարտած",
+    left: "Դուրս եկած",
+  };
+
+  return (
+    <span
+      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${colors[status]}`}
+    >
+      {labels[status]}
+    </span>
+  );
+}
+function AddStudentModal({ groups, onClose, onAdd, onUpdate, editingStudent }) {
+  const [formData, setFormData] = useState({
+    name: editingStudent?.name || "",
+    phone: editingStudent?.phone || "",
+    status: editingStudent?.status || "active",
+    joinDate:
+      editingStudent?.join_date || new Date().toISOString().split("T")[0],
+    finishDate: editingStudent?.finish_date || "",
+    groupId: editingStudent?.group_id || groups[0]?.id || 1,
+    paymentDay: editingStudent?.payment_day || 1,
+  });
+
+  const handleSubmit = () => {
+    if (formData.name && formData.phone) {
+      if (editingStudent) {
+        onUpdate(editingStudent.id, formData);
+      } else {
+        onAdd(formData);
+      }
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-md w-full p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">
+            {editingStudent ? "Խմբագրել ուսանողին" : "Ավելացնել նոր ուսանող"}
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Անուն</label>
+            <input
+              type="text"
+              required
+              value={formData.name}
+              onChange={(e) =>
+                setFormData({ ...formData, name: e.target.value })
+              }
+              className="w-full px-3 py-2 border rounded-md"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Հեռախոս</label>
+            <input
+              type="tel"
+              required
+              value={formData.phone}
+              onChange={(e) =>
+                setFormData({ ...formData, phone: e.target.value })
+              }
+              className="w-full px-3 py-2 border rounded-md"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Կարգավիճակ</label>
+            <select
+              value={formData.status}
+              onChange={(e) =>
+                setFormData({ ...formData, status: e.target.value })
+              }
+              className="w-full px-3 py-2 border rounded-md"
+            >
+              <option value="active">Ակտիվ</option>
+              <option value="finished">Ավարտած</option>
+              <option value="left">Դուրս եկած</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Խումբ</label>
+            <select
+              value={formData.groupId}
+              onChange={(e) =>
+                setFormData({ ...formData, groupId: parseInt(e.target.value) })
+              }
+              className="w-full px-3 py-2 border rounded-md"
+            >
+              {groups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Միանալու ամսաթիվ
+            </label>
+            <input
+              type="date"
+              required
+              value={formData.joinDate}
+              onChange={(e) =>
+                setFormData({ ...formData, joinDate: e.target.value })
+              }
+              className="w-full px-3 py-2 border rounded-md"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Ավարտելու ամսաթիվ
+            </label>
+            <input
+              type="date"
+              value={formData.finishDate}
+              onChange={(e) =>
+                setFormData({ ...formData, finishDate: e.target.value })
+              }
+              className="w-full px-3 py-2 border rounded-md"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Վճարման օր (1-31)
+            </label>
+            <input
+              type="number"
+              required
+              min="1"
+              max="31"
+              value={formData.paymentDay}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  paymentDay: parseInt(e.target.value),
+                })
+              }
+              className="w-full px-3 py-2 border rounded-md"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border rounded-md hover:bg-gray-50"
+            >
+              Չեղարկել
+            </button>
+            <button
+              onClick={handleSubmit}
+              className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+            >
+              {editingStudent ? "Պահպանել" : "Ավելացնել"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+// {
+//   activeTab === "payments" && (
+//     <PaymentsView
+//       payments={payments}
+//       students={students}
+//       filters={paymentFilters}
+//       setFilters={setPaymentFilters}
+//       onAddPayment={() => setShowAddPayment(true)}
+//       onEditPayment={(payment) => {
+//         setEditingPayment(payment);
+//         setShowAddPayment(true);
+//       }}
+//       onDeletePayment={handleDeletePayment}
+//     />
+//   );
+// }
+
 function PaymentsView({
   payments,
   students,
   filters,
   setFilters,
   onAddPayment,
+  onEditPayment,
+  onDeletePayment,
 }) {
   const filteredPayments = useMemo(() => {
     return payments.filter((payment) => {
@@ -843,6 +1253,9 @@ function PaymentsView({
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Կարգավիճակ
               </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Գործողություններ
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -868,6 +1281,22 @@ function PaymentsView({
                       {payment.paid ? "Վճարված" : "Չվճարված"}
                     </span>
                   </td>
+                  <td className="px-6 py-4">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => onEditPayment(payment)}
+                        className="text-blue-600 hover:text-blue-800 text-sm"
+                      >
+                        Խմբագրել
+                      </button>
+                      <button
+                        onClick={() => onDeletePayment(payment.id)}
+                        className="text-red-600 hover:text-red-800 text-sm"
+                      >
+                        Ջնջել
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
@@ -877,205 +1306,12 @@ function PaymentsView({
     </div>
   );
 }
-
-function StatCard({ title, value, icon: Icon, color }) {
-  const colorClasses = {
-    blue: "bg-blue-500",
-    green: "bg-green-500",
-    emerald: "bg-emerald-500",
-    red: "bg-red-500",
-  };
-
-  return (
-    <div className="bg-white p-6 rounded-lg shadow-sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-600 mb-1">{title}</p>
-          <p className="text-2xl font-bold">{value}</p>
-        </div>
-        <div className={`${colorClasses[color]} p-3 rounded-lg`}>
-          <Icon className="text-white" size={24} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatusBar({ label, count, color }) {
-  return (
-    <div>
-      <div className="flex justify-between text-sm mb-1">
-        <span className="font-medium">{label}</span>
-        <span className="text-gray-600">{count}</span>
-      </div>
-      <div className="w-full bg-gray-200 rounded-full h-2">
-        <div
-          className={`${color} h-2 rounded-full`}
-          style={{ width: `${Math.min(count * 20, 100)}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const colors = {
-    active: "bg-green-100 text-green-800",
-    finished: "bg-blue-100 text-blue-800",
-    left: "bg-gray-100 text-gray-800",
-  };
-
-  const labels = {
-    active: "Ակտիվ",
-    finished: "Ավարտած",
-    left: "Դուրս եկած",
-  };
-
-  return (
-    <span
-      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${colors[status]}`}
-    >
-      {labels[status]}
-    </span>
-  );
-}
-
-function AddStudentModal({ groups, onClose, onAdd }) {
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    status: "active",
-    joinDate: new Date().toISOString().split("T")[0],
-    finishDate: null,
-    groupId: groups[0]?.id || 1,
-    paymentDay: 1,
-    customFields: {},
-  });
-
-  const handleSubmit = () => {
-    if (formData.name && formData.phone) {
-      onAdd(formData);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-md w-full p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Ավելացնել նոր ուսանող</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Անուն</label>
-            <input
-              type="text"
-              required
-              value={formData.name}
-              onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
-              }
-              className="w-full px-3 py-2 border rounded-md"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Հեռախոս</label>
-            <input
-              type="tel"
-              required
-              value={formData.phone}
-              onChange={(e) =>
-                setFormData({ ...formData, phone: e.target.value })
-              }
-              className="w-full px-3 py-2 border rounded-md"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Խումբ</label>
-            <select
-              value={formData.groupId}
-              onChange={(e) =>
-                setFormData({ ...formData, groupId: parseInt(e.target.value) })
-              }
-              className="w-full px-3 py-2 border rounded-md"
-            >
-              {groups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Միանալու ամսաթիվ
-            </label>
-            <input
-              type="date"
-              required
-              value={formData.joinDate}
-              onChange={(e) =>
-                setFormData({ ...formData, joinDate: e.target.value })
-              }
-              className="w-full px-3 py-2 border rounded-md"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Վճարման օր (1-31)
-            </label>
-            <input
-              type="number"
-              required
-              min="1"
-              max="31"
-              value={formData.paymentDay}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  paymentDay: parseInt(e.target.value),
-                })
-              }
-              className="w-full px-3 py-2 border rounded-md"
-            />
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border rounded-md hover:bg-gray-50"
-            >
-              Չեղարկել
-            </button>
-            <button
-              onClick={handleSubmit}
-              className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-            >
-              Ավելացնել
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function AddPaymentModal({ students, onClose, onAdd }) {
   const [formData, setFormData] = useState({
     studentId: students[0]?.id || "",
-    amount: 200,
+    amount: 20000,
     date: new Date().toISOString().split("T")[0],
-    paid: false,
+    paid: true,
   });
 
   const handleSubmit = () => {
@@ -1180,7 +1416,7 @@ function AddGroupModal({ onClose, onSave, editingGroup }) {
   const [formData, setFormData] = useState({
     name: editingGroup?.name || "",
     schedule: editingGroup?.schedule || "",
-    maxStudents: editingGroup?.max_students || 10,
+    maxStudents: editingGroup?.max_students || 7,
   });
 
   const handleSubmit = () => {
